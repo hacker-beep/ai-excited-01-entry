@@ -7,5 +7,4 @@ const destination = resolve(process.env.MAKEFUN_OUTPUT_DIR || '/output');
 const metadata = await stat(artwork);
 if (metadata.size > 1_048_576) throw new Error('Artwork exceeds the image byte limit');
 await mkdir(destination, { recursive: true });
-// Publish the seeded HDR renderer’s authored PNG without altering any bytes.
 await copyFile(artwork, resolve(destination, 'entry.png'));

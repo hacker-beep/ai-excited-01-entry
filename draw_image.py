@@ -1,153 +1,179 @@
-"""Seeded HDR plasma / refractive glass still life. No external image assets."""
+"""Deterministic scene-linear still-life renderer for a sun breaking from glass."""
 from pathlib import Path
+
 import numpy as np
-from scipy.ndimage import gaussian_filter, map_coordinates, distance_transform_edt
 from PIL import Image, ImageDraw
+from scipy.ndimage import gaussian_filter, map_coordinates, distance_transform_edt
 
-S = 1024
-rng = np.random.default_rng(62017)
-y, x = np.mgrid[:S, :S].astype(np.float64)
+SIZE = 1024
+rng = np.random.default_rng(6172026)
+y, x = np.mgrid[:SIZE, :SIZE].astype(np.float64)
 
-def noise(scale, u=x, v=y):
-    grid = rng.random((int(S / scale)+5, int(S / scale)+5))
-    return map_coordinates(grid, [v/scale+1, u/scale+1], order=3, mode='reflect')
 
-def fbm(u, v):
-    return sum(w*noise(s,u,v) for s,w in [(100,.38),(43,.26),(18,.18),(7,.11),(2.5,.07)])
+def field(scale, u=x, v=y):
+    grid = rng.random((int(SIZE / scale) + 5, int(SIZE / scale) + 5))
+    return map_coordinates(grid, [v / scale + 1, u / scale + 1], order=3, mode='reflect')
 
-def sample(a, u, v):
-    return np.stack([map_coordinates(a[:,:,c], [v,u], order=1, mode='nearest') for c in range(3)],-1)
 
-def add(field, color):
-    global hdr
-    hdr += field[:,:,None]*np.array(color)
+def turbulence(u, v):
+    return sum(weight * field(scale, u, v) for scale, weight in
+               ((128, .32), (58, .25), (26, .19), (11, .13), (4, .075), (1.7, .035)))
 
-# Defocused indigo studio, distant wall, and tactile walnut tabletop.
-wall = fbm(x,y)
-hdr = np.zeros((S,S,3)) + [0.009, .017, .045]
-hdr += wall[:,:,None]*np.array([.012,.018,.035])
-horizon = 807
-floor = np.clip((y-horizon)/24,0,1)
-wood = noise(18, x*.36 + 12*np.sin(y/150), y*5) + .16*noise(3,x,y*3)
-wood += .13*np.sin(y*.9+noise(65)*14)+.08*noise(1.4)
-lightpool = np.exp(-((x-518)/260)**2-((y-859)/95)**2)
-desk = np.stack([.035+.025*wood,.022+.015*wood,.019+.012*wood],-1)
-desk += lightpool[:,:,None]*[.58,.24,.055]
-hdr = hdr*(1-floor[:,:,None])+desk*floor[:,:,None]
-# Soft contact shadow under the jar.
-hdr *= (1-.77*np.exp(-((x-514)/114)**2-((y-934)/18)**2))[:,:,None]
-add(np.exp(-((x-514)/320)**2-((y-566)/350)**2),[.20,.058,.009])
 
-# Photosphere: spherical coordinates, domain-warped convection, emissive granules.
-cx, cy, radius = 511, 392, 271
-dx,dy=(x-cx)/radius,(y-cy)/radius
-r=np.hypot(dx,dy)
-theta=np.arctan2(dy,dx)
-z=np.sqrt(np.clip(1-r*r,0,1))
-u=x+42*(noise(75)-.5)+24*z
-v=y+44*(noise(67)-.5)-32*z
-conv=fbm(u,v)
-fine=noise(3.1,u,v)
-# Many irregular flame fingers, with turbulent soft volume boundaries.
+def sample(image, u, v):
+    return np.stack([map_coordinates(image[:, :, c], [v, u], order=1, mode='nearest')
+                     for c in range(3)], axis=-1)
+
+
+hdr = np.zeros((SIZE, SIZE, 3), dtype=np.float64)
+# Indigo studio wall fades into a walnut surface with a broad, warm light pool.
+wallgrain = field(33) * .012
+hdr[:] = [0.009, .014, .038]
+hdr += wallgrain[:, :, None] * [0.6, 1.0, 1.8]
+horizon = 808
+floor = np.clip((y - horizon) / 19, 0, 1)
+woodgrain = field(19, x * .42 + 12 * np.sin(y / 135), y * 4.3)
+woodgrain += .18 * field(3.4, x, y * 2.8) + .08 * np.sin(y * .9 + field(66) * 14)
+desk = np.stack([.026 + .022 * woodgrain, .016 + .014 * woodgrain,
+                 .014 + .011 * woodgrain], axis=-1)
+pool = np.exp(-((x - 514) / 282) ** 2 - ((y - 856) / 95) ** 2)
+desk += pool[:, :, None] * [0.63, .27, .052]
+hdr = hdr * (1 - floor[:, :, None]) + desk * floor[:, :, None]
+hdr *= (1 - .68 * np.exp(-((x - 513) / 110) ** 2 - ((y - 934) / 18) ** 2))[:, :, None]
+
+# A turbulent, spherical photosphere: mottled convection below a soft plasma limb.
+cx, cy, radius = 512, 390, 274
+dx, dy = (x - cx) / radius, (y - cy) / radius
+r = np.hypot(dx, dy)
+theta = np.arctan2(dy, dx)
+depth = np.sqrt(np.clip(1 - r * r, 0, 1))
+warp_u = x + 39 * (field(86) - .5) + 25 * depth
+warp_v = y + 42 * (field(72) - .5) - 29 * depth
+convection = turbulence(warp_u, warp_v)
+micro = field(2.4, warp_u, warp_v)
+granulation = np.clip((convection - .31) * 2.25, 0, 1)
+filament = np.clip((convection - .43) * 5.5, 0, 1)
+cellular = .38 + 2.25 * granulation + 1.12 * filament + .48 * micro
+cellular *= .45 + .55 * depth ** .55
+core = np.exp(-((dx + .19) / .52) ** 2 - ((dy + .21) / .51) ** 2)
+
+# Uneven arcs, fine prominences and turbulent tongues create a volumetric corona.
 angular = np.zeros_like(r)
-for k in range(58):
-    angle=rng.uniform(-np.pi,np.pi)
-    delta=np.arctan2(np.sin(theta-angle),np.cos(theta-angle))
-    bend=.85*(r-1)*np.sin(angle*5)
-    angular += rng.uniform(.025,.14)*np.exp(-((delta-bend)/rng.uniform(.035,.085))**2)
-warp=fbm(x+45*noise(43),y+45*noise(39))
-edge=1+angular+.055*(warp-.5)
-corona=np.exp(-np.maximum(r-1,0)*14)*(r>.98)
-flames=np.exp(-((r-1.015)/(edge-.95))**2*2)*(r>.98)
-filaments=np.clip((warp-.36)*2.3,0,1)**2
-emission=(corona*.32+flames*2.8)*( .25+filaments)
-add(emission,[3.7,.77,.055])
-# Volumetric column rises out of the broken mouth and feeds the sphere.
-columnwidth=17+np.clip((780-y),0,180)*.20
-column=np.exp(-((x-512-10*np.sin(y/33))/columnwidth)**2*2)*np.exp(-((y-700)/102)**4)
-add(column*(.5+2*fbm(x,y)),[3.4,1.55,.25])
-mask=np.clip((1.003+.017*(warp-.5)-r)*90,0,1)
-granules=np.clip((conv-.25)*1.7,0,1)
-lanes=np.clip((conv-.38)*5,0,1)
-intensity=(.35+2.4*granules+1.3*lanes+.65*fine)*(.40+.60*z**.45)
-core=np.exp(-((dx+.22)/.55)**2-((dy+.20)/.50)**2)
-solar=np.stack([intensity*1.35+core*2.2,intensity**1.6*.31+core*1.5,intensity**2*.022+core*.68],-1)
-hdr=hdr*(1-mask[:,:,None])+solar*mask[:,:,None]
+for _ in range(96):
+    angle = rng.uniform(-np.pi, np.pi)
+    delta = np.arctan2(np.sin(theta - angle), np.cos(theta - angle))
+    width = rng.uniform(.025, .082)
+    bend = (r - 1) * rng.uniform(-1.3, 1.3) + .011 * np.sin(theta * rng.integers(3, 9))
+    angular += rng.uniform(.008, .055) * np.exp(-((delta - bend) / width) ** 2)
+edge_noise = turbulence(x + 38 * field(52), y + 35 * field(46))
+limb = 1 + angular + .075 * (edge_noise - .5)
+outside = np.maximum(r - limb, 0)
+corona = np.exp(-outside * 15) * (r > .96)
+tongues = np.exp(-((r - limb - .018) / (.025 + .008 * np.clip(edge_noise, 0, 1))) ** 2)
+plasma = corona * (.25 + 1.05 * np.clip((edge_noise - .30) * 2, 0, 1)) + tongues * .34
+hdr += plasma[:, :, None] * [3.8, 1.13, .12]
+disc = np.clip((1.01 - r) * 85, 0, 1)
+sun = np.stack([cellular * 1.28 + core * 2.45,
+                cellular ** 1.58 * .34 + core * 1.55,
+                cellular ** 2 * .022 + core * .56], axis=-1)
+hdr = hdr * (1 - disc[:, :, None]) + sun * disc[:, :, None]
 
-# Tiny broken cylindrical preserving jar: normal-map refraction and Fresnel reflection.
-background=hdr.copy()
-center=513; top=778; bottom=932; half=67
-q=(x-center)/half
-topedge=top+4*np.sin(x*.15)+3*np.sin(x*.37)
-body=(np.abs(q)<1)&(y>topedge)&(y<bottom-7+7*np.sqrt(np.clip(1-q*q,0,1)))
-nx=np.clip(q,-.999,.999)
-nz=np.sqrt(np.clip(1-nx*nx,.001,1))
-# Air/glass index 1.52: stronger offsets through curved outer walls.
-refx=x-18*nx/(nz+.22)
-refy=y+3*np.sin((y-top)/150*np.pi)+2*nx*nx
-refracted=sample(background,refx,refy)
-fresnel=.04+.96*(1-nz)**5
-reflection=np.stack([.06+.3*nz,.12+.20*nz,.22+.16*nz],-1)
-glass=refracted*np.array([.82,.91,.94])+fresnel[:,:,None]*reflection
-    # Glass thickness attenuates light most strongly at grazing angles.
-glass *= (1-.38*np.abs(q)**8)[:,:,None]
-# Interior warm reflections and narrow softbox / sun streaks.
-left=np.exp(-((q+.79)/.035)**2)*np.exp(-((y-854)/71)**4)
-right=np.exp(-((q-.88)/.023)**2)*np.exp(-((y-855)/72)**4)
-back=np.exp(-((q+.51)/.08)**2)*np.exp(-((y-847)/60)**4)
-glass+=(left[:,:,None]*[1.5,1.65,1.55]+right[:,:,None]*[2.4,1.22,.35]+back[:,:,None]*[.22,.28,.33])
-hdr=np.where(body[:,:,None],glass,hdr)
-# Thick elliptical base and fractured bright lip with reflected underside.
-for ey, ry, strength in [(925,12,.27),(918,10,.14),(779,13,1.0),(785,12,.32),(794,12,.12),(801,12,.09)]:
-    er=np.sqrt(((x-center)/half)**2+((y-ey)/ry)**2)
-    ring=np.exp(-((er-1)/.065)**2)*strength
-    if ey<800:
-        ring *= .22+.78*np.clip(np.sin(x*.13+y*.17)*3,0,1)
-    add(ring,[1.8,1.04,.36] if ey<800 else [.55,.64,.65])
-# Bright caustic on the table, optically stretched behind the base.
-caustic=np.exp(-((np.sqrt(((x-514)/94)**2+((y-944)/19)**2)-1)/.12)**2)
-add(caustic*.14,[1.7,.85,.20])
+# A narrow, turbulent plume connects the burst to the broken bottle mouth.
+shaft_noise = turbulence(x * .65, y * 1.35)
+shaft_width = 13 + np.clip(790 - y, 0, 170) * .18 + 7 * shaft_noise
+shaft_center = 512 + 8 * np.sin(y / 29) + 7 * (shaft_noise - .5)
+shaft = np.exp(-((x - shaft_center) / shaft_width) ** 2 * 1.7) * np.exp(-((y - 700) / 112) ** 4)
+hdr += shaft[:, :, None] * (.55 + 1.7 * turbulence(x, y))[:, :, None] * [2.9, 1.25, .19]
 
-# Irregular curved glass fragments, each refracting its own background region.
-for i in range(24):
-    a=rng.uniform(0,2*np.pi)
-    reach=rng.uniform(100,300)
-    px=512+np.cos(a)*reach
-    py=742-abs(np.sin(a))*rng.uniform(35,190)
-    if 300<px<735 and py<675: continue
-    length=rng.uniform(12,38); width=rng.uniform(5,16)
-    angle=rng.uniform(-3,3)
-    pts=[]
-    for k in range(6):
-        t=2*np.pi*k/6
-        lx=np.cos(t)*length*rng.uniform(.7,1.2)
-        ly=np.sin(t)*width*rng.uniform(.65,1.2)
-        pts.append((px+lx*np.cos(angle)-ly*np.sin(angle),py+lx*np.sin(angle)+ly*np.cos(angle)))
-    im=Image.new('L',(S,S)); ImageDraw.Draw(im).polygon(pts,fill=255)
-    m=np.array(im)>0
-    dist=distance_transform_edt(m)
-    gy,gx=np.gradient(gaussian_filter(dist,1))
-    refr=sample(hdr,x+gx*8+np.cos(angle)*5,y+gy*8+np.sin(angle)*4)
-    reflected=(.07+.2*np.maximum(0,gx*.7-gy))[:,:,None]*np.array([.5,.72,1.0])
-    hdr=np.where(m[:,:,None],refr*.86+reflected,hdr)
-    edge=m&(dist<1.6)
-    spec=np.clip(gx*.5-gy*.8,0,1)**5
-    hdr+=edge[:,:,None]*(spec[:,:,None]*[4,2.8,1.3]+[.025,.035,.05])
-    # Inner bevel catches a separate warm reflection, giving the shard thickness.
-    bevel=m&(dist>1.6)&(dist<3.0)
-    hdr+=bevel[:,:,None]*np.maximum(0,-gx-gy)[:,:,None]*[.34,.17,.04]
+# Defocused reflected light and a subtle veil around the photosphere.
+hdr += np.exp(-((x - cx) / 335) ** 2 - ((y - 520) / 390) ** 2)[:, :, None] * [.13, .045, .008]
 
-# Sensor response: multiscale lens bloom in scene-linear light, then filmic exposure.
-bright=np.maximum(hdr-.9,0)
-for sigma, weight in [(2,.15),(9,.20),(29,.20),(75,.12)]:
-    hdr+=gaussian_filter(bright,(sigma,sigma,0))*weight
-vignette=np.clip(1-.35*((x-512)**2+(y-480)**2)/650000,.55,1)
-hdr*=vignette[:,:,None]
-# ACES-like shoulder preserves white-hot emission and rich photographic shadows.
-a,b,c,d,e=2.51,.03,2.43,.59,.14
-rgb=np.clip((hdr*(a*hdr+b))/(hdr*(c*hdr+d)+e),0,1)**(1/2.2)
-rgb+=rng.normal(0,.00065,(S,S,1))
-img=Image.fromarray(np.uint8(np.clip(rgb,0,1)*255))
-# RGB output preserves smooth optical gradients without palette banding.
-img.save(Path(__file__).with_name('entry.png'),optimize=True)
-img.convert('RGB').resize((300,300),Image.Resampling.LANCZOS).save(Path(__file__).with_name('preview.png'))
+# Refractive glass bottle; a warped normal field bends the sampled background.
+background = hdr.copy()
+center, top, bottom, half = 512, 780, 932, 67
+q = (x - center) / half
+top_edge = top + 3.2 * np.sin(x * .12) + 1.8 * np.sin(x * .31)
+body = (np.abs(q) < 1) & (y > top_edge) & (y < bottom - 8 + 8 * np.sqrt(np.clip(1 - q*q, 0, 1)))
+edge_slope = np.clip(q, -.985, .985)
+normal_x = edge_slope
+normal_y = .035 * np.sin((y - top) / 16) + .018 * np.sin(x / 8)
+normal_z = np.sqrt(np.clip(1 - normal_x**2 - normal_y**2, .025, 1))
+offset_x = 19 * normal_x / (normal_z + .27) + 4 * normal_y
+offset_y = 4.5 * normal_y / (normal_z + .25) + 2.2 * normal_x**2
+refracted = sample(background, x - offset_x, y + offset_y)
+fresnel = .035 + .965 * (1 - normal_z) ** 5
+reflection = np.stack([.055 + .25 * normal_z, .095 + .24 * normal_z,
+                       .17 + .29 * normal_z], axis=-1)
+glass = refracted * [.78, .87, .93] + fresnel[:, :, None] * reflection
+glass += np.stack([.015 + .028 * (1-normal_z), .025 + .05 * (1-normal_z),
+                   .035 + .075 * (1-normal_z)], axis=-1)
+glass *= (1 - .26 * np.abs(q)**9)[:, :, None]
+softbox = np.exp(-((q + .78) / .055)**2) * np.exp(-((y - 852) / 77)**4)
+warm_edge = np.exp(-((q - .86) / .038)**2) * np.exp(-((y - 850) / 77)**4)
+inner = np.exp(-((q + .48) / .11)**2) * np.exp(-((y - 844) / 63)**4)
+glass += (softbox[:, :, None] * [1.8, 1.9, 1.8] +
+          warm_edge[:, :, None] * [2.55, 1.42, .53] +
+          inner[:, :, None] * [.22, .30, .39])
+hdr = np.where(body[:, :, None], glass, hdr)
+
+# Thick bottom heel, shattered rim and refracted caustics.
+for ey, ry, strength in ((926, 12, .28), (919, 9, .14), (780, 11, .85),
+                         (786, 10, .40), (793, 10, .17), (801, 9, .10)):
+    ellipse = np.sqrt(((x - center) / half)**2 + ((y - ey) / ry)**2)
+    ring = np.exp(-((ellipse - 1) / .052)**2) * strength
+    if ey < 800:
+        ring *= .18 + .82 * np.clip(np.sin(x * .12 + y * .19) * 2.8, 0, 1)
+    hdr += ring[:, :, None] * ([1.8, 1.22, .62] if ey < 800 else [ .48, .58, .66 ])
+caustic_r = np.sqrt(((x - 514) / 106)**2 + ((y - 944) / 22)**2)
+caustic = np.exp(-((caustic_r - 1) / .24)**2) * (.42 + .58 * field(11))
+hdr += caustic[:, :, None] * [.55, .25, .055]
+
+# Each splinter has a distinct shard mask, beveled thickness, normal and reflected edge.
+for _ in range(33):
+    angle = rng.uniform(0, 2 * np.pi)
+    reach = rng.uniform(100, 305)
+    px = 512 + np.cos(angle) * reach
+    py = 747 - abs(np.sin(angle)) * rng.uniform(30, 200)
+    if 302 < px < 724 and py < 675:
+        continue
+    length, width = rng.uniform(13, 42), rng.uniform(4, 14)
+    rotation = rng.uniform(-3.1, 3.1)
+    points = []
+    for k in range(7):
+        a = 2 * np.pi * k / 7
+        lx = np.cos(a) * length * rng.uniform(.66, 1.24)
+        ly = np.sin(a) * width * rng.uniform(.65, 1.3)
+        points.append((px + lx*np.cos(rotation) - ly*np.sin(rotation),
+                       py + lx*np.sin(rotation) + ly*np.cos(rotation)))
+    mask_image = Image.new('L', (SIZE, SIZE))
+    ImageDraw.Draw(mask_image).polygon(points, fill=255)
+    mask = np.asarray(mask_image) > 0
+    if not mask.any():
+        continue
+    distance = distance_transform_edt(mask)
+    gy, gx = np.gradient(gaussian_filter(distance, .72))
+    thickness = rng.uniform(.72, .94)
+    refr = sample(hdr, x + gx * rng.uniform(5, 11) + np.cos(rotation) * 4,
+                  y + gy * rng.uniform(5, 11) + np.sin(rotation) * 4)
+    refr_color = np.array([.82, .91, .98]) * thickness
+    hdr = np.where(mask[:, :, None], refr * refr_color, hdr)
+    bevel = mask & (distance > .8) & (distance < rng.uniform(2.6, 4.2))
+    glint = np.clip(gx * .48 - gy * .72 + .12, 0, 1) ** 4
+    hdr += bevel[:, :, None] * (glint[:, :, None] * [2.65, 2.15, 1.55] + [.045, .055, .072])
+    inner_bevel = mask & (distance > 2.0) & (distance < 4.0)
+    hdr += inner_bevel[:, :, None] * np.clip(-gx - .4*gy, 0, 1)[:, :, None] * [.40, .25, .11]
+
+# Scene-linear optical bloom rolls off gently into the room; DOF and grain stay restrained.
+bright = np.maximum(hdr - .72, 0)
+for sigma, amount in ((2.2, .13), (8, .18), (24, .16), (62, .09)):
+    hdr += gaussian_filter(bright, (sigma, sigma, 0)) * amount
+hdr = gaussian_filter(hdr, (0.42, 0.42, 0))
+vignette = np.clip(1 - .30 * ((x - 512)**2 + (y - 476)**2) / 690000, .59, 1)
+hdr *= vignette[:, :, None]
+# Filmic shoulder retains the hot white-gold core and colored shadows.
+a, b, c, d, e = 2.51, .03, 2.43, .59, .14
+rgb = np.clip((hdr * (a*hdr + b)) / (hdr * (c*hdr + d) + e), 0, 1) ** (1/2.2)
+rgb += rng.normal(0, .00055, (SIZE, SIZE, 1))
+image = Image.fromarray(np.uint8(np.clip(rgb, 0, 1) * 255), mode='RGB')
+image.save(Path(__file__).with_name('entry.png'), optimize=True)
+image.resize((300, 300), Image.Resampling.LANCZOS).save(Path(__file__).with_name('preview.png'))

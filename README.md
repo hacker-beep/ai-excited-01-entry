@@ -1,15 +1,15 @@
-# A small idea hatches a star — v2
+# A Star in the Making
 
-A huge newborn sun erupts from a tiny broken glass jar on a walnut desk, lighting an indigo room.
+A newborn sun erupts from a tiny broken glass jar on a walnut desk, casting warm light into an indigo studio.
 
-Run with Node 22, without dependencies or network access:
+Run the entrypoint with Node 22:
 
 ```sh
 MAKEFUN_OUTPUT_DIR=out node main.ts
 ```
 
-The entrypoint copies the authored 1024×1024 `entry.png` byte for byte. The default destination is `/output/entry.png`.
+It copies the authored 1024 x 1024 `entry.png` byte for byte. The default output path is `/output/entry.png`.
 
-Regenerate the artwork with `python3 draw_image.py` (NumPy, SciPy and Pillow). The fixed-seed renderer constructs the scene without external images: domain-warped multiscale plasma, a white-gold core, turbulent corona, scene-linear multiscale bloom, cylindrical glass refraction, Fresnel reflection, refractive irregular shards, table caustics, soft contact shadows, film grain and vignette. RGB PNG output preserves smooth light gradients. It also writes a local 300px `preview.png` for visual inspection.
+Regenerate the deterministic artwork with `python3 draw_image.py` using NumPy, SciPy and Pillow. The renderer builds its scene from seeded multiscale turbulence, volumetric plasma, refractive glass, individual beveled shards, caustics, soft shadows, lens bloom, film grain and vignette. It also creates a local 300 px preview for inspection.
 
-The renderer uses physically inspired approximations, rather than a full light-transport simulation. The artwork and source are licensed under MIT; see `LICENSE`.
+The renderer uses physically inspired optical approximations rather than a full light-transport simulation. Artwork and source are available under the MIT license in `LICENSE`.

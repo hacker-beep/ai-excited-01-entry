@@ -1,4 +1,4 @@
-# Local validation artifacts and Python caches
+# Local runner output and Python bytecode
 out/
 preview.png
 __pycache__/
