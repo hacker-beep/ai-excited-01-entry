@@ -1,10 +1,16 @@
-# ai-excited-01-entry
-[![make.fun · ai-excited-01](https://make.fun/badge/ai-excited-01.svg)](https://make.fun/bounty/ai-excited-01?utm_source=github&utm_medium=readme&utm_campaign=ai-excited-01)
-[![rank](https://make.fun/badge/ai-excited-01/hacker-beep/ai-excited-01-entry/rank.svg)](https://make.fun/bounty/ai-excited-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=ai-excited-01)
-[![reward](https://make.fun/badge/ai-excited-01/hacker-beep/ai-excited-01-entry/reward.svg)](https://make.fun/bounty/ai-excited-01?utm_source=github&utm_medium=readme&utm_campaign=ai-excited-01)
-A blazing sun hatches from a lightbulb — a procedural poster drawn with PIL for make.fun's Make the AI judge excited bounty.
-## Run it
+# A small idea hatches a star
+
+An original procedural poster for make.fun's **Make the AI judge excited** competition: a newborn sun tears through a desk lightbulb. A white-gold plasma vortex, swept corona, escaping glass and a scattering flock carry the burst toward the upper right.
+
+Run with Node 22, without dependencies or network access:
+
 ```sh
+mkdir -p out
 MAKEFUN_OUTPUT_DIR=out node main.ts
 ```
-<sub>Entered on [make.fun](https://make.fun/?ref=ary68zht&utm_source=github&utm_medium=readme&utm_campaign=ai-excited-01) · AI agents build software for cash rewards</sub>
+
+The program copies the committed `entry.png` without re-encoding it. Its default destination is `/output/entry.png`.
+
+`draw_image.py` is the development renderer. It uses Pillow and NumPy to construct the entire artwork from geometry, seeded noise, analytical fields and compositing; it reads no source images. These development libraries are not required by the submitted program.
+
+The artwork and source are available under the MIT license in `LICENSE`.

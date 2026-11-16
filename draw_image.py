@@ -1,195 +1,241 @@
+"""Draw an original solar hatching poster; no external image inputs."""
 from PIL import Image, ImageDraw, ImageFilter
+import numpy as np
 import math
 import random
 
-S = 1024
-random.seed(1847)
+SIZE = 1024
+rng = random.Random(62017)
+yy, xx = np.mgrid[0:SIZE, 0:SIZE]
 
-def layer():
-    return Image.new("RGBA", (S, S), (0, 0, 0, 0))
+def sheet():
+    return Image.new('RGBA', (SIZE, SIZE))
 
-def glow(canvas, center, radius, color, blur):
-    halo = layer()
-    d = ImageDraw.Draw(halo)
-    x, y = center
-    d.ellipse((x-radius, y-radius, x+radius, y+radius), fill=color)
-    canvas.alpha_composite(halo.filter(ImageFilter.GaussianBlur(blur)))
+def composite(art, blur=0):
+    global canvas
+    canvas = Image.alpha_composite(canvas, art.filter(ImageFilter.GaussianBlur(blur)) if blur else art)
 
-im = Image.new("RGB", (S, S))
-p = im.load()
-for y in range(S):
-    for x in range(S):
-        v = max(0, 1-math.hypot((x-520)/900, (y-430)/850))
-        p[x, y] = (int(7+10*y/S+12*v), int(13+13*y/S+19*v), int(39+28*y/S+46*v))
-im = im.convert("RGBA")
+def stroke(points, color, width=1, blur=0):
+    art = sheet()
+    ImageDraw.Draw(art).line(points, fill=color, width=width, joint='curve')
+    composite(art, blur)
 
-# Broad cool beams aim toward the opening, with a warm halo behind it.
-beams = layer()
-bd = ImageDraw.Draw(beams)
-for angle, alpha in [(-71,25),(-54,23),(-38,17),(-20,13),(8,12)]:
+def curve(a, b, c, d, steps=80):
+    result = []
+    for k in range(steps+1):
+        t = k/steps
+        u = 1-t
+        result.append((u*u*u*a[0]+3*u*u*t*b[0]+3*u*t*t*c[0]+t*t*t*d[0],
+                       u*u*u*a[1]+3*u*u*t*b[1]+3*u*t*t*c[1]+t*t*t*d[1]))
+    return result
+
+def haze(x, y, rx, ry, color, strength):
+    a = np.exp(-(((xx-x)/rx)**2+((yy-y)/ry)**2)*2)*strength
+    data = np.zeros((SIZE,SIZE,4), dtype=np.uint8)
+    data[:,:,:3] = color
+    data[:,:,3] = a.astype(np.uint8)
+    composite(Image.fromarray(data))
+
+# A dark room gives the impossible newborn star all of the visual space.
+v = np.maximum(0, 1-np.hypot((xx-560)/950, (yy-420)/950))
+bg = np.stack((8+v*9+yy*.004, 13+v*16, 35+v*35), axis=-1).astype(np.uint8)
+canvas = Image.fromarray(bg).convert('RGBA')
+haze(600,390,470,480,(255,100,19),155)
+haze(390,640,410,520,(25,102,190),80)
+
+# Directional rays move diagonally out of the bulb rather than radiating evenly.
+art = sheet()
+d = ImageDraw.Draw(art)
+for angle, reach, width, alpha in [(-48,1000,31,55),(-35,1000,19,48),(-64,920,19,38),(15,850,12,25),(-152,800,12,20)]:
     a = math.radians(angle)
-    vx, vy = math.cos(a), math.sin(a)
-    px, py = -vy, vx
-    cx, cy, reach = 578, 397, 1050
-    half = 16 if alpha > 20 else 9
-    bd.polygon([(cx+vx*reach+px*half,cy+vy*reach+py*half),
-                (cx+vx*reach-px*half,cy+vy*reach-py*half),
-                (cx-vx*130-px*half/4,cy-vy*130-py*half/4),
-                (cx-vx*130+px*half/4,cy-vy*130+py*half/4)],
-               fill=(83,174,255,alpha))
-im.alpha_composite(beams.filter(ImageFilter.GaussianBlur(18)))
-glow(im,(590,405),310,(255,103,28,75),95)
-glow(im,(594,395),220,(255,203,69,80),48)
+    vx,vy = math.cos(a),math.sin(a)
+    px,py = -vy,vx
+    d.polygon([(570,590),(570+vx*reach+px*width,590+vy*reach+py*width),
+               (570+vx*reach-px*width,590+vy*reach-py*width)],fill=(255,192,83,alpha))
+composite(art,8)
 
-# Orbit-like arcs imply a much larger space beyond the single subject.
-d = ImageDraw.Draw(im)
-d.arc((120,70,1000,950),198,322,fill=(60,174,255,90),width=2)
-d.arc((65,20,970,925),205,291,fill=(132,211,255,55),width=1)
-d.arc((215,118,930,833),18,142,fill=(255,177,78,95),width=2)
+# Surviving bulb walls: asymmetric, fractured, and visibly smaller than the sun.
+left = curve((444,779),(415,627),(248,603),(265,405))
+left += curve((265,405),(258,287),(331,218),(403,198))
+right = curve((648,774),(652,664),(739,631),(769,535))
+for pts in [left,right]:
+    stroke(pts,(47,184,244,110),15,9)
+    stroke(pts,(104,220,255,210),4)
+stroke(curve((309,377),(288,471),(345,549),(375,568)),(173,237,255,95),2)
 
-# A cyan rim preserves the bulb silhouette around the sun's expanding globe.
-glass = layer()
-g = ImageDraw.Draw(glass)
-left = [(418,786),(398,717),(365,661),(319,601),(282,527),(259,448),
-        (262,364),(290,293),(343,232),(421,191),(510,177),(600,191),(666,224),(700,255)]
-g.line(left,fill=(104,221,255,180),width=5,joint="curve")
-g.line([(700,255),(675,291)],fill=(104,221,255,180),width=4)
-g.line([(745,386),(772,445),(755,520),(724,572),(681,626),(646,683),(630,760)],
-       fill=(104,221,255,155),width=5,joint="curve")
-g.line([(355,349),(323,412),(338,478),(374,539)],fill=(184,245,255,95),width=2)
-g.line([(370,594),(409,641),(430,697)],fill=(184,245,255,85),width=2)
-im.alpha_composite(glass.filter(ImageFilter.GaussianBlur(5)))
-im.alpha_composite(glass)
+# Tapered flame loops bend with the diagonal solar wind.
+cx,cy,radius = 606,365,276
+for angle,length,width in [(-134,74,14),(-105,68,13),(-79,100,18),(-52,163,24),(-29,130,20),(-8,100,14),(24,80,13),(64,51,11),(162,53,10)]:
+    a = math.radians(angle)
+    vx,vy = math.cos(a),math.sin(a)
+    tx,ty = -vy,vx
+    start=(cx+vx*(radius-15),cy+vy*(radius-15))
+    tip=(cx+vx*(radius+length)+tx*length*.30,cy+vy*(radius+length)+ty*length*.30)
+    end=(cx+vx*(radius+4)+tx*40,cy+vy*(radius+4)+ty*40)
+    path=curve(start,(start[0]+vx*length*.50-tx*length*.35,
+                     start[1]+vy*length*.50-ty*length*.35),
+               (tip[0]-vx*length*.15+tx*length*.35,
+                tip[1]-vy*length*.15+ty*length*.35),tip)
+    def tongue(scale, color):
+        edge1=[]; edge2=[]
+        for k,(x,y) in enumerate(path):
+            t=k/(len(path)-1)
+            before=path[max(0,k-1)]; after=path[min(len(path)-1,k+1)]
+            dx=after[0]-before[0]; dy=after[1]-before[1]
+            norm=max(.001,math.hypot(dx,dy))
+            w=width*scale*(1-t)**.8*(.65+.6*math.sin(t*math.pi))
+            edge1.append((x-dy/norm*w,y+dx/norm*w))
+            edge2.append((x+dy/norm*w,y-dx/norm*w))
+        art=sheet()
+        ImageDraw.Draw(art).polygon(edge1+edge2[::-1],fill=color)
+        return art
+    flame=tongue(1,(255,123,9,255))
+    composite(flame,11); composite(flame)
+    composite(tongue(.50,(255,197,54,255)))
+    composite(tongue(.15,(255,249,185,245)),1)
 
-# The oversized solar disk has a lit spherical core, a drawn limb and a flowing current.
-sun = layer()
-s = ImageDraw.Draw(sun)
-cx, cy = 610, 384
-radius = 286
-disk = Image.new("RGBA",(radius*2,radius*2),(0,0,0,0))
-dp = disk.load()
-for yy in range(radius*2):
-    for xx in range(radius*2):
-        nx, ny = (xx-radius)/radius, (yy-radius)/radius
-        distance = math.sqrt(nx*nx+ny*ny)
-        if distance <= 1:
-            light = max(0,1-math.hypot(nx+.28,ny+.34)/1.45)
-            edge = max(0,(distance-.72)/.28)
-            dp[xx,yy] = (255, int(236-89*edge+16*light), int(156-113*edge+32*light), 255)
-sun.alpha_composite(disk,(cx-radius,cy-radius))
-s = ImageDraw.Draw(sun)
-s.ellipse((cx-300,cy-300,cx+300,cy+300),outline=(255,151,48,255),width=13)
-s.arc((cx-281,cy-281,cx+281,cy+281),205,337,fill=(255,255,223,230),width=7)
-s.arc((cx-267,cy-267,cx+267,cy+267),22,153,fill=(220,78,34,220),width=12)
-s.arc((cx-227,cy-227,cx+227,cy+227),185,266,fill=(255,255,246,150),width=4)
-# A curved solar current cuts across the face and bends back toward the filament.
-def bezier(a,b,c,d,count=48):
-    points=[]
-    for i in range(count+1):
-        t=i/count
-        q=1-t
-        points.append((int(q**3*a[0]+3*q*q*t*b[0]+3*q*t*t*c[0]+t**3*d[0]),
-                       int(q**3*a[1]+3*q*q*t*b[1]+3*q*t*t*c[1]+t**3*d[1])))
-    return points
-current = bezier((380,478),(452,335),(604,503),(829,262))
-s.line(current,fill=(239,101,39,210),width=25,joint="curve")
-s.line([(x,y-7) for x,y in current],fill=(255,247,183,240),width=5,joint="curve")
-s.ellipse((current[0][0]-7,current[0][1]-7,current[0][0]+7,current[0][1]+7),fill=(255,255,239,255))
-s.ellipse((current[-1][0]-8,current[-1][1]-8,current[-1][0]+8,current[-1][1]+8),fill=(255,255,239,255))
-im.alpha_composite(sun.filter(ImageFilter.GaussianBlur(20)))
-im.alpha_composite(sun)
+# Analytic turbulence: multiple warped scales make a living solar photosphere.
+nx=(xx-cx)/radius
+ny=(yy-cy)/radius
+rr=np.hypot(nx,ny)
+theta=np.arctan2(ny,nx)
+# Smooth, seeded noise is warped into giant vortices, with smaller convection cells.
+noise_rng=np.random.default_rng(62017)
+def field(cells):
+    coarse=(noise_rng.random((cells,cells))*255).astype(np.uint8)
+    return np.asarray(Image.fromarray(coarse).resize((SIZE,SIZE),Image.Resampling.BICUBIC)).astype(float)/255
+n1,n2,n3,n4=field(8),field(22),field(57),field(165)
+# Several local vortices avoid a synthetic pinwheel singularity at the center.
+u=xx.astype(float).copy(); v=yy.astype(float).copy()
+for ox,oy,reach,spin in [(480,290,225,2.2),(710,410,190,-1.8),(490,520,150,1.7)]:
+    dx=u-ox; dy=v-oy
+    turn=spin*np.exp(-(dx*dx+dy*dy)/(reach*reach))
+    u=ox+dx*np.cos(turn)-dy*np.sin(turn)
+    v=oy+dx*np.sin(turn)+dy*np.cos(turn)
+def sample(arr):
+    xi=np.clip(u,0,SIZE-2); yi=np.clip(v,0,SIZE-2)
+    ix=xi.astype(int); iy=yi.astype(int)
+    fx=xi-ix; fy=yi-iy
+    return (arr[iy,ix]*(1-fx)*(1-fy)+arr[iy,ix+1]*fx*(1-fy)
+            +arr[iy+1,ix]*(1-fx)*fy+arr[iy+1,ix+1]*fx*fy)
+a,b,c,d=sample(n1),sample(n2),sample(n3),sample(n4)
+texture=.40*a+.30*b+.20*c+.10*d
+ridges=(1-np.abs(2*(.58*b+.29*c+.13*d)-1))**9
+core=np.exp(-(((nx+.20)/.40)**2+((ny+.17)/.36)**2)*2)
+limb=np.clip((rr-.70)/.30,0,1)
+light=np.clip(.12+.74*texture+.24*ridges+.54*core-.28*limb,0,1)
+surface=np.zeros((SIZE,SIZE,4),dtype=np.uint8)
+surface[:,:,0]=255
+surface[:,:,1]=np.clip(91+164*light,0,255)
+surface[:,:,2]=np.clip(3+245*light**3.0,0,255)
+surface[:,:,3]=np.where(rr<=1,255,0)
+solar=Image.fromarray(surface)
+composite(solar,18)
+composite(solar)
 
-# Long corona tongues pull the motion toward the upper-right corner.
-cor = layer()
-c = ImageDraw.Draw(cor)
-c.polygon([(738,151),(808,50),(788,176),(875,99),(821,215),(925,176),(832,254)],fill=(255,186,57,255))
-c.polygon([(832,263),(963,206),(868,302),(1002,295),(873,346)],fill=(255,119,48,255))
-c.polygon([(672,104),(701,4),(714,148)],fill=(255,225,116,255))
-c.polygon([(383,178),(308,101),(369,213)],fill=(255,151,48,240))
-c.polygon([(879,433),(1008,468),(874,477)],fill=(255,188,67,245))
-im.alpha_composite(cor.filter(ImageFilter.GaussianBlur(12)))
-im.alpha_composite(cor)
+# A single broad rising current breaks into tapered subsidiary tongues.
+eddies=sheet()
+e=ImageDraw.Draw(eddies)
+paths=[curve((377,488),(493,307),(646,518),(819,227)),
+       curve((428,535),(574,450),(733,551),(842,350)),
+       curve((419,248),(457,185),(553,169),(643,231))]
+for j,points in enumerate(paths):
+    for k in range(len(points)-1):
+        t=k/(len(points)-1)
+        width=int((29 if j==0 else 15)*math.sin(math.pi*t)**.6)+1
+        e.line(points[k:k+2],fill=(201,66,8,45 if j==0 else 0),width=width)
+        shifted=[(x-1,y-6) for x,y in points[k:k+2]]
+        e.line(shifted,fill=(255,247,164,70 if j==0 else 0),width=max(1,width//4))
+mask=Image.fromarray(np.where(rr<=.965,255,0).astype(np.uint8))
+eddies.putalpha(Image.fromarray((np.asarray(eddies.getchannel('A')).astype(float)*np.asarray(mask)/255).astype(np.uint8)))
+composite(eddies,3)
+haze(551,325,105,92,(255,255,223),140)
+# Thin limb highlights keep the sphere readable against its corona.
+limb_art=sheet()
+e=ImageDraw.Draw(limb_art)
+e.arc((cx-radius,cy-radius,cx+radius,cy+radius),185,307,fill=(255,250,194,255),width=5)
+e.arc((cx-radius,cy-radius,cx+radius,cy+radius),5,103,fill=(255,136,27,255),width=7)
+composite(limb_art)
 
-# Sparse shards are sharp, translucent triangles with bright glass edges.
-shards = layer()
-g = ImageDraw.Draw(shards)
-for points, color in [
-    ([(302,319),(228,254),(269,374)],(76,194,255,92)),
-    ([(279,505),(191,542),(310,555)],(102,221,255,80)),
-    ([(742,276),(817,196),(777,329)],(92,206,255,100)),
-    ([(765,543),(853,578),(735,591)],(84,198,255,88)),
-    ([(388,231),(352,147),(425,204)],(161,233,255,88)),
-    ([(708,622),(780,676),(681,657)],(95,205,255,78)),
-]:
-    g.polygon(points,fill=color,outline=(151,235,255,230))
-    g.line([points[0],points[1],points[2]],fill=(224,252,255,195),width=2)
-im.alpha_composite(shards.filter(ImageFilter.GaussianBlur(5)))
-im.alpha_composite(shards)
+# The neck ruptures in a sharp elliptical crown, not a random scatter.
+ring=sheet()
+d=ImageDraw.Draw(ring)
+d.arc((365,591,742,723),5,173,fill=(255,159,35,255),width=18)
+d.arc((365,591,742,723),12,169,fill=(255,255,211,255),width=6)
+for a in range(190,356,18):
+    t=math.radians(a)
+    x=554+181*math.cos(t)
+    y=659+60*math.sin(t)
+    d.line([(x,y),(x+math.cos(t)*24,y+math.sin(t)*37)],fill=(219,250,255,230),width=3)
+# Alternating bright facets mark an actual fractured glass lip.
+for degrees in [17,34,58,83,112,139,165]:
+    a=math.radians(degrees)
+    x=554+188*math.cos(a); y=657+64*math.sin(a)
+    h=10+(degrees%4)*4
+    d.polygon([(x-9,y),(x+3,y-h),(x+12,y+3)],fill=(191,245,255,230))
+composite(ring,14)
+composite(ring)
 
-# A few birds crossing the bright limb make the scale legible at a glance.
-d = ImageDraw.Draw(im)
-for x,y,z in [(882,372,1.0),(930,417,.65),(844,326,.58),(785,469,.48)]:
-    d.arc((x-12*z,y-5*z,x,y+7*z),190,345,fill=(15,29,61,255),width=max(2,int(3*z)))
-    d.arc((x,y-5*z,x+12*z,y+7*z),195,350,fill=(15,29,61,255),width=max(2,int(3*z)))
+# Each glass splinter has a coherent outward trajectory and a swept light trail.
+shard_specs=[(285,284,-.85,-.85,54),(190,535,-1,.02,48),(355,157,-.4,-1,32),
+             (811,214,.65,-.9,53),(863,568,1,-.15,51),(778,714,.8,.5,38),
+             (328,702,-.8,.5,33),(932,346,1,-.4,26)]
+for x,y,vx,vy,z in shard_specs:
+    stroke([(x-vx*105,y-vy*105),(x,y)],(94,207,255,100),7,5)
+    stroke([(x-vx*82-8,y-vy*82+8),(x-vx*15-8,y-vy*15+8)],(153,232,255,155),2)
+    pts=[(x+vx*z,y+vy*z),(x-vy*z*.42,y+vx*z*.42),(x-vx*z*.40+vy*z*.22,y-vy*z*.40-vx*z*.22)]
+    art=sheet(); d=ImageDraw.Draw(art)
+    d.polygon(pts,fill=(64,152,202,130),outline=(174,240,255,255))
+    d.line([pts[0],pts[1]],fill=(245,255,251,255),width=3)
+    composite(art,3); composite(art)
 
-# The filament spirals out of the metal neck and becomes the sun's seed.
-wire = layer()
-w = ImageDraw.Draw(wire)
-w.line([(478,754),(475,693),(503,650),(550,615),(583,568),(576,514)],
-       fill=(255,235,149,255),width=7,joint="curve")
-w.line([(604,755),(612,702),(587,660),(555,627),(535,590)],
-       fill=(255,135,44,255),width=5,joint="curve")
-w.ellipse((563,496,590,523),fill=(255,255,226,245))
-im.alpha_composite(wire.filter(ImageFilter.GaussianBlur(12)))
-im.alpha_composite(wire)
+# Filament roots tie the new sun physically to the ordinary metal bulb base.
+for pts,w in [(curve((478,786),(453,694),(528,700),(557,625)),6),
+              (curve((614,785),(642,699),(583,713),(578,646)),5)]:
+    stroke(pts,(255,139,22,255),w*3,10)
+    stroke(pts,(255,242,168,255),w)
 
-# Screw threads and contact pin make the tiny ordinary object unmistakable.
-base = layer()
-b = ImageDraw.Draw(base)
-b.polygon([(430,743),(650,743),(632,858),(600,895),(480,895),(447,857)],
-          fill=(22,40,75,255),outline=(127,210,255,255))
-b.rectangle((438,752,643,774),fill=(60,116,151,255),outline=(189,240,255,255),width=3)
-for y, inset in [(787,7),(815,13),(843,20),(867,28)]:
-    b.line([(440+inset,y-5),(640-inset,y+5)],fill=(139,194,218,255),width=7)
-    b.line([(443+inset,y),(637-inset,y+9)],fill=(12,25,53,255),width=4)
-b.polygon([(480,895),(600,895),(579,925),(500,925)],fill=(230,158,64,255),outline=(255,229,158,255))
-b.ellipse((500,914,579,934),fill=(255,212,112,255),outline=(255,245,196,255),width=3)
-im.alpha_composite(base)
+# A desk with a broad warm spill grounds the scale and reflects the event.
+art=sheet(); d=ImageDraw.Draw(art)
+d.polygon([(0,902),(1024,860),(1024,1024),(0,1024)],fill=(16,25,43,255))
+d.line([(0,902),(1024,860)],fill=(94,145,176,255),width=3)
+composite(art)
+spill=sheet()
+pix=np.zeros((SIZE,SIZE,4),dtype=np.uint8)
+fall=np.exp(-(((xx-550)/300)**2+((yy-921)/62)**2)*2)
+pix[:,:,:3]=(255,157,52)
+pix[:,:,3]=np.where(yy>902-xx*.041,fall*160,0).astype(np.uint8)
+composite(Image.fromarray(pix))
+for offset in [0,23,57]:
+    stroke([(260-offset,944+offset//2),(780+offset,920+offset//2)],(249,176,86,45),2)
 
-# The tabletop and a folded note ground the impossible event in an ordinary room.
-table = layer()
-t = ImageDraw.Draw(table)
-t.polygon([(0,897),(1024,855),(1024,1024),(0,1024)],fill=(15,25,49,255))
-t.line([(0,897),(1024,855)],fill=(105,193,228,235),width=5)
-t.line([(0,914),(1024,872)],fill=(39,69,100,255),width=3)
-t.polygon([(155,909),(220,904),(232,951),(168,956)],fill=(197,219,220,255),outline=(255,248,202,255))
-t.line([(168,922),(209,919)],fill=(64,99,123,255),width=2)
-t.line([(169,932),(213,929)],fill=(64,99,123,255),width=2)
-t.line([(170,942),(198,940)],fill=(64,99,123,255),width=2)
-im.alpha_composite(table)
+# Curved screw threads are lit gold on one side and cool blue on the other.
+art=sheet(); d=ImageDraw.Draw(art)
+d.ellipse((423,872,660,923),fill=(5,10,23,220))
+d.polygon([(430,764),(650,764),(628,871),(594,900),(482,900),(450,869)],fill=(35,48,61,255),outline=(143,191,205,255))
+for y,inset in [(775,0),(799,5),(823,10),(847,16),(869,25)]:
+    pts=curve((440+inset,y),(494,y+16),(578,y+21),(642-inset,y+4))
+composite(art)
+for y,inset in [(775,0),(799,5),(823,10),(847,16),(869,25)]:
+    pts=curve((440+inset,y),(494,y+16),(578,y+21),(642-inset,y+4))
+    stroke(pts,(7,18,33,255),13)
+    stroke([(x,y-4) for x,y in pts],(128,174,190,255),7)
+    stroke([(x,y-5) for x,y in pts[:44]],(255,214,132,255),4)
+art=sheet(); d=ImageDraw.Draw(art)
+d.rounded_rectangle((496,895,585,921),radius=10,fill=(179,132,65,255),outline=(255,216,139,255),width=3)
+composite(art)
 
-# Controlled streaks and sparks add speed while leaving the silhouette clean.
-motion = layer()
-m = ImageDraw.Draw(motion)
-for _ in range(34):
-    x, y = random.randint(235,970), random.randint(175,790)
-    dx = random.randint(18,74)
-    m.line([(x,y),(x+dx,y-int(dx*.55))],
-           fill=random.choice([(255,204,100,175),(121,216,255,150),(255,124,66,170)]),
-           width=random.choice([1,2,3]))
-for _ in range(52):
-    x, y, r = random.randint(50,990), random.randint(90,850), random.choice([1,2,2,3])
-    m.ellipse((x-r,y-r,x+r,y+r),fill=random.choice([(255,220,148,200),(112,209,255,170),(255,146,83,180)]))
-im.alpha_composite(motion)
-
-# Soft edge falloff protects the focal contrast.
-vignette = Image.new("L",(S,S))
-v = vignette.load()
-for y in range(S):
-    for x in range(S):
-        distance = math.hypot((x-512)/725,(y-490)/760)
-        v[x,y] = int(max(0,min(100,(distance-.55)*105)))
-shade = Image.new("RGBA",(S,S),(3,7,24,0))
-shade.putalpha(vignette)
-im.alpha_composite(shade)
-im.convert("RGB").save("entry.png",format="PNG",optimize=True)
+# A sparse flock scatters across the limb, silhouettes rather than decoration.
+for x,y,z,tilt in [(818,395,12,-.4),(854,432,9,.3),(799,454,7,-.5),(895,405,6,.2)]:
+    pts=[(x-z,y-4),(x-z*.4,y-7+tilt*z),(x,y),(x+z*.4,y-7-tilt*z),(x+z,y-3)]
+    stroke(pts,(13,24,41,255),3)
+# Fine sparks follow the same diagonal acceleration.
+for k in range(43):
+    x=rng.randint(240,960); y=rng.randint(80,780)
+    if math.hypot(x-cx,y-cy)<radius+22:
+        continue
+    length=rng.randint(3,22)
+    stroke([(x,y),(x+length,y-length*.65)],(255,194,96,rng.randint(90,210)),rng.choice([1,1,2]))
+canvas = canvas.filter(ImageFilter.GaussianBlur(.65))
+canvas.convert('RGB').save('entry.png',optimize=True)
+canvas.convert('RGB').resize((300,300),Image.Resampling.LANCZOS).save('preview.png')

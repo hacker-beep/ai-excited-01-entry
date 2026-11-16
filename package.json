@@ -1,4 +1,7 @@
 {
+  "name": "solar-hatching-entry",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "description": "Deterministic original solar hatching poster for ai-excited-01",
+  "engines": { "node": ">=22" }
 }

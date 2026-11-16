@@ -1,2 +1,4 @@
+# Local validation artifacts and Python caches
 out/
+preview.png
 __pycache__/
